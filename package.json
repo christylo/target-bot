@@ -1,0 +1,34 @@
+{
+  "name": "army-bomb-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "helper": "tsx src/helper.ts",
+    "helper:login": "tsx src/helper.ts login",
+    "helper:buy": "tsx src/helper.ts buy",
+    "helper:buy-at": "tsx src/helper.ts buy-at",
+    "once": "tsx src/index.ts once",
+    "verify": "npm run check && npm test && npm run build",
+    "test": "tsx --test tests/**/*.test.ts",
+    "watch": "tsx src/index.ts watch",
+    "watch:buy": "tsx src/index.ts watch-buy",
+    "watch:buy-at": "tsx src/index.ts watch-buy-at"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "dotenv": "^17.2.3",
+    "nodemailer": "^7.0.3",
+    "playwright": "^1.54.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@types/nodemailer": "^7.0.11",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
