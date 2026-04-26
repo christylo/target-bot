@@ -1,8 +1,9 @@
-import { loadConfig } from "./config.js";
+import { loadConfig, type AppConfig } from "./config.js";
 import { createNotifiers } from "./alerts/notifier.js";
 import { parseArgs } from "./cli.js";
 import { Tracker } from "./core/tracker.js";
 import { runAssistant } from "./helper/assistant.js";
+import { runBrowserWatchAndBuy, runBrowserWatchLoop } from "./helper/browser-watch.js";
 import { formatDuration, resolveScheduledStart } from "./helper/schedule.js";
 import { sleep } from "./utils/runtime.js";
 
@@ -25,7 +26,17 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "watch-browser") {
+    await runBrowserWatchLoop(tracker, config.pollIntervalMs, config);
+    return;
+  }
+
   if (command === "watch-buy") {
+    await runBrowserWatchAndBuy(tracker, config.pollIntervalMs, config);
+    return;
+  }
+
+  if (command === "watch-http-buy") {
     await runHttpWatchAndBuy(tracker, config.pollIntervalMs, config);
     return;
   }
@@ -41,15 +52,17 @@ async function main(): Promise<void> {
     const startAt = resolveScheduledStart(rawTimestamp);
     const delayMs = startAt.getTime() - Date.now();
     console.log(
-      `Scheduling low-latency watch-and-buy for ${startAt.toString()} (${formatDuration(delayMs)} from now).`
+      `Scheduling browser-backed watch-and-buy for ${startAt.toString()} (${formatDuration(delayMs)} from now).`
     );
     await sleep(delayMs);
-    console.log(`Starting low-latency poll at ${new Date().toString()}.`);
-    await runHttpWatchAndBuy(tracker, config.pollIntervalMs, config);
+    console.log(`Starting browser-backed poll at ${new Date().toString()}.`);
+    await runBrowserWatchAndBuy(tracker, config.pollIntervalMs, config);
     return;
   }
 
-  throw new Error(`Unknown command "${command}". Use "once", "watch", "watch-buy", or "watch-buy-at".`);
+  throw new Error(
+    `Unknown command "${command}". Use "once", "watch", "watch-browser", "watch-buy", "watch-http-buy", or "watch-buy-at".`
+  );
 }
 
 async function runWatchLoop(tracker: Tracker, pollIntervalMs: number): Promise<void> {
@@ -69,7 +82,7 @@ async function runWatchLoop(tracker: Tracker, pollIntervalMs: number): Promise<v
 async function runHttpWatchAndBuy(
   tracker: Tracker,
   pollIntervalMs: number,
-  config: ReturnType<typeof loadConfig>
+  config: AppConfig
 ): Promise<void> {
   console.log(`Starting low-latency watch-and-buy loop with ${pollIntervalMs}ms polling interval.`);
 

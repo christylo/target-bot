@@ -52,8 +52,10 @@ npm run watch
 ## Commands
 
 - `npm run once`: Fetch and evaluate the product page once.
-- `npm run watch`: Keep polling until stopped.
-- `npm run watch:buy`: Keep polling until the product is detected in stock, then launch the buy helper immediately.
+- `npm run watch`: Keep polling with the raw HTTP page fetch until stopped.
+- `npm run watch:browser`: Keep polling through your saved Target browser session without launching the buy flow.
+- `npm run watch:buy`: Keep polling through your saved Target browser session until the product is detected in stock, then continue toward checkout.
+- `npm run watch:http-buy`: Keep polling with the raw HTTP page fetch, then launch the buy helper when that raw page says in stock.
 - `npm run helper:login`: Open a persistent browser profile so you can sign in to Target manually.
 - `npm run helper:buy`: Reuse that saved session, add one item if available, and move toward checkout without placing the order.
 - `npm run helper:buy-at -- 2026-03-20T23:58:00`: Wait until an exact local timestamp, then launch the buy helper automatically.
@@ -126,11 +128,11 @@ If you do not trust the exact drop time and want the tool to react the moment th
 POLL_INTERVAL_MS=1000 npm run watch:buy
 ```
 
-That mode keeps polling, detects the first `in_stock` result, and immediately launches the logged-in checkout helper. It also avoids duplicate launches during the same in-stock streak and applies a short retry cooldown if the helper errors.
+That mode keeps polling in your logged-in Target browser session, detects the first `in_stock` result, and immediately continues into the checkout helper. It also avoids duplicate launches during the same in-stock streak and applies a short retry cooldown if the helper errors.
 
 ## Notes on Target-specific behavior
 
-Target availability can vary by ZIP, store, and fulfillment method. V1 intentionally stays simple and watches the page representation you can fetch right now. If the PDP behaves differently for your location, set `TARGET_COOKIE_HEADER` to the cookies from a browser session so the tracker sees the same regional state you do.
+Target availability can vary by ZIP, store, and fulfillment method. `npm run watch` intentionally stays simple and watches the raw page representation you can fetch right now. If that output says `source=dom-text` and disagrees with what you see in a logged-in browser, use `npm run watch:browser` or `npm run watch:buy`; those commands reuse your persistent Target browser session and inspect the hydrated page. `TARGET_COOKIE_HEADER` and `TARGET_EXTRA_HEADERS_JSON` are still available for raw HTTP polling, but the browser-backed watcher is the better default for Target PDPs that depend on your saved session.
 
 ## Future browser-assisted checkout path
 
