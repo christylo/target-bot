@@ -57,7 +57,7 @@ const POLL_INTERVAL_MS = 100;
 const SHORT_SETTLE_MS = 100;
 const MEDIUM_SETTLE_MS = 250;
 const FAST_CLICK_TIMEOUT_MS = 1_500;
-const LOCATOR_READ_TIMEOUT_MS = 250;
+const LOCATOR_READ_TIMEOUT_MS = 1_000;
 
 interface TimingLogger {
   sinceStart(label: string): void;
@@ -145,6 +145,8 @@ export async function runBuyFlowOnPage(
     const inCartIndicator = await findInCartIndicator(page);
     if (inCartIndicator) {
       const label = await locatorLabel(inCartIndicator);
+      await setProductPageQuantity(page, config.targetCheckoutQuantity);
+      timing.sinceLast(`product-page quantity set to ${config.targetCheckoutQuantity}`);
       console.log(`Product appears to already be in cart via "${label}". Going directly to cart.`);
       await page.goto(config.targetCartUrl, { waitUntil: "domcontentloaded" });
       await ensureCartOrCheckoutContext(page, config.targetCartUrl, "in-cart indicator");
@@ -153,8 +155,6 @@ export async function runBuyFlowOnPage(
       timing.sinceLast("cart page settled");
       await preferShippingInCart(page);
       timing.sinceLast("shipping preference handled");
-      await enforceSingleQuantity(page);
-      timing.sinceLast("quantity enforcement handled");
       if (config.targetHelperProceedToCheckout) {
         await driveCheckout(page, config.targetHelperMaxCheckoutSteps);
         timing.sinceLast("checkout automation finished");
@@ -178,8 +178,6 @@ export async function runBuyFlowOnPage(
       timing.sinceLast("cart entry action settled");
       await preferShippingInCart(page);
       timing.sinceLast("shipping preference handled");
-      await enforceSingleQuantity(page);
-      timing.sinceLast("quantity enforcement handled");
       if (config.targetHelperProceedToCheckout) {
         await driveCheckout(page, config.targetHelperMaxCheckoutSteps);
         timing.sinceLast("checkout automation finished");
@@ -205,7 +203,10 @@ export async function runBuyFlowOnPage(
     );
   }
 
-  console.log("Add to cart is enabled. Attempting to add one item.");
+  await setProductPageQuantity(page, config.targetCheckoutQuantity);
+  timing.sinceLast(`product-page quantity set to ${config.targetCheckoutQuantity}`);
+
+  console.log(`Add to cart is enabled. Attempting to add ${config.targetCheckoutQuantity} item(s).`);
   timing.sinceLast("clicking add to cart");
   await clickAddToCart(addToCart);
 
@@ -222,8 +223,6 @@ export async function runBuyFlowOnPage(
   timing.sinceLast("cart navigation finished");
   await preferShippingInCart(page);
   timing.sinceLast("shipping preference handled");
-  await enforceSingleQuantity(page);
-  timing.sinceLast("quantity enforcement handled");
 
   if (config.targetHelperProceedToCheckout) {
     await driveCheckout(page, config.targetHelperMaxCheckoutSteps);
@@ -285,6 +284,18 @@ async function findProductAddToCartButton(
   page: Page,
   targetProductUrl?: string
 ): Promise<Locator | null> {
+  const targetSelectors = [
+    'button[data-test="shippingButton"]',
+    'button[id^="addToCartButtonOrTextIdFor"]'
+  ];
+
+  for (const selector of targetSelectors) {
+    const button = page.locator(selector).first();
+    if (await safeIsVisible(button)) {
+      return button;
+    }
+  }
+
   const buttons = page.getByRole("button");
   const count = await buttons.count();
   const inferredName = await inferProductNameFromPage(page);
@@ -359,6 +370,14 @@ async function navigateToCart(page: Page, cartUrl: string): Promise<void> {
 }
 
 export async function preferShippingOnProductPage(page: Page): Promise<void> {
+  await preferShippingOnProductPageWithTimeout(page, FAST_CLICK_TIMEOUT_MS);
+}
+
+export async function preferShippingOnProductPageFast(page: Page): Promise<void> {
+  await preferShippingOnProductPageWithTimeout(page, 150);
+}
+
+async function preferShippingOnProductPageWithTimeout(page: Page, clickTimeoutMs: number): Promise<void> {
   if (!/\/p\//i.test(page.url())) {
     return;
   }
@@ -371,18 +390,27 @@ export async function preferShippingOnProductPage(page: Page): Promise<void> {
   ];
 
   for (const candidate of shippingCandidates) {
-    if (!(await safeIsVisible(candidate))) {
+    const visible = await withTimeout(candidate.isVisible().catch(() => false), false, clickTimeoutMs);
+    if (!visible) {
       continue;
     }
 
-    const label = await locatorLabel(candidate);
+    const text = await withTimeout(candidate.innerText().catch(() => ""), "", clickTimeoutMs);
+    const aria = await withTimeout(candidate.getAttribute("aria-label").then((value) => value ?? ""), "", clickTimeoutMs);
+    const label = normalizeWhitespace(`${text} ${aria}`);
     if (/selected/i.test(label)) {
       console.log(`Shipping already selected on product page via "${label}".`);
       return;
     }
 
     console.log(`Selecting Shipping on product page via "${label || "shipping option"}".`);
-    await quickClick(candidate);
+    try {
+      await quickClick(candidate, clickTimeoutMs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(`Shipping option disappeared before it could be selected; continuing with current page state. ${message}`);
+      return;
+    }
     await settleAfterAction(page);
     return;
   }
@@ -402,23 +430,78 @@ async function ensureCartOrCheckoutContext(
   await settleDomOnly(page, SHORT_SETTLE_MS);
 }
 
-async function enforceSingleQuantity(page: Page): Promise<void> {
-  const quantitySelect = page.locator("select").filter({
-    has: page.locator("option[value='1'], option:has-text('1')")
-  }).first();
-
-  if (await safeIsVisible(quantitySelect)) {
-    await quantitySelect.selectOption("1").catch(() => quantitySelect.selectOption({ label: "1" }));
+async function setProductPageQuantity(page: Page, quantity: number): Promise<void> {
+  if (quantity <= 1 || !/\/p\//i.test(page.url())) {
     return;
   }
 
-  const quantityButton = page.getByRole("button", { name: /qty|quantity/i }).first();
-  if (await safeIsVisible(quantityButton)) {
-    await quantityButton.click();
-    const oneOption = page.getByRole("option", { name: /^1$/i }).first();
-    if (await safeIsVisible(oneOption)) {
-      await oneOption.click();
+  const quantityText = String(quantity);
+  const quantitySelect = page.locator("select").filter({
+    has: page.locator(`option[value='${quantityText}'], option:has-text('${quantityText}')`)
+  }).first();
+
+  if (await safeIsVisible(quantitySelect)) {
+    await quantitySelect.selectOption(quantityText).catch(() => quantitySelect.selectOption({ label: quantityText }));
+    await settleAfterAction(page);
+    return;
+  }
+
+  const quantityButtons = [
+    page.locator('[data-test="custom-quantity-picker"]').first(),
+    page.getByRole("button", { name: /qty|quantity/i }).first()
+  ];
+
+  for (const quantityButton of quantityButtons) {
+    if (!(await safeIsVisible(quantityButton))) {
+      continue;
     }
+
+    const label = await locatorLabel(quantityButton);
+    if (label.includes(quantityText)) {
+      return;
+    }
+
+    console.log(`Setting product-page quantity to ${quantityText} via "${label || "quantity picker"}".`);
+    await quickClick(quantityButton);
+    await settleAfterAction(page);
+
+    const option = page.getByRole("option", { name: new RegExp(`^${quantityText}$`, "i") }).first();
+    if (await safeIsVisible(option)) {
+      await quickClick(option);
+      await settleAfterAction(page);
+      return;
+    }
+
+    const buttonOption = page.getByRole("button", { name: new RegExp(`^${quantityText}$`, "i") }).first();
+    if (await safeIsVisible(buttonOption)) {
+      await quickClick(buttonOption);
+      await settleAfterAction(page);
+      return;
+    }
+
+    await chooseQuantityWithKeyboard(page, quantityButton, quantity);
+    await settleAfterAction(page);
+    return;
+  }
+}
+
+async function chooseQuantityWithKeyboard(page: Page, quantityButton: Locator, quantity: number): Promise<void> {
+  const quantityText = String(quantity);
+  const label = await locatorLabel(quantityButton);
+  const current = Number(label.match(/\b(\d+)\b/)?.[1] ?? "1");
+  const delta = Math.max(0, quantity - current);
+
+  for (let index = 0; index < delta; index += 1) {
+    await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(100);
+  }
+
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(1_000);
+
+  const updatedLabel = await locatorLabel(quantityButton);
+  if (!updatedLabel.includes(quantityText)) {
+    throw new Error(`Tried to set quantity to ${quantityText}, but the picker still reads "${updatedLabel}".`);
   }
 }
 
@@ -467,56 +550,148 @@ async function preferShippingInCart(page: Page): Promise<void> {
 
 async function attemptCheckout(page: Page): Promise<void> {
   if (isCartLikeUrl(page.url())) {
-    const cartCheckoutButton = page.locator('button[data-test="checkout-button"]').first();
-    await cartCheckoutButton.waitFor({ state: "attached", timeout: 1_500 }).catch(() => undefined);
-    const count = await cartCheckoutButton.count();
-    if (count > 0) {
-      const visible = await safeIsVisible(cartCheckoutButton);
-      const label = await locatorLabel(cartCheckoutButton);
-      console.log(
-        `Cart checkout button lookup: count=${count} visible=${visible} label="${label || "Check out"}".`
-      );
-
-      await cartCheckoutButton.scrollIntoViewIfNeeded().catch(() => undefined);
-      if (visible) {
-        await quickClick(cartCheckoutButton);
-      } else {
-        const clicked = await page.evaluate(() => {
-          const button = document.querySelector('button[data-test="checkout-button"]');
-          if (!(button instanceof HTMLButtonElement)) {
-            return false;
-          }
-
-          button.click();
-          return true;
-        });
-
-        if (!clicked) {
-          console.log('Cart checkout button was attached but could not be clicked via DOM fallback.');
-        }
-      }
-      await settleAfterAction(page);
-      return;
-    }
-
-    console.log('Cart checkout button lookup: count=0 visible=false label="".');
+    await settlePage(page, MEDIUM_SETTLE_MS);
+    await clickCartCheckout(page);
+    return;
   }
 
   const checkoutCandidates: Locator[] = [
-    page.locator('[data-test="checkout-button"]').first(),
-    page.locator('[data-test="partial-checkout-button"]').first(),
+    page.locator('button[data-test="checkout-button"]').first(),
+    page.locator('button[data-test="partial-checkout-button"]').first(),
     page.getByRole("button", { name: /check out|checkout/i }).first()
   ];
 
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    for (const checkoutAction of checkoutCandidates) {
+      if (await safeIsVisible(checkoutAction)) {
+        const label = await locatorLabel(checkoutAction);
+        console.log(`Proceeding to checkout via "${label || "checkout"}".`);
+        await clickCheckout(page, checkoutAction);
+        await settlePage(page, MEDIUM_SETTLE_MS);
+        if (!isCheckoutLikeUrl(page.url())) {
+          await page.waitForURL(/checkout|co-review|co-delivery|co-payment|co-login/i, {
+            timeout: 5_000
+          }).catch(() => undefined);
+        }
+        if (!isCheckoutLikeUrl(page.url())) {
+          throw new Error(`Clicked checkout action "${label || "checkout"}", but remained on ${page.url()}.`);
+        }
+        return;
+      }
+    }
+
+    await page.waitForTimeout(POLL_INTERVAL_MS);
+  }
+
   for (const checkoutAction of checkoutCandidates) {
-    if (await safeIsVisible(checkoutAction)) {
-      const label = await locatorLabel(checkoutAction);
-      console.log(`Proceeding to checkout via "${label || "checkout"}".`);
-      await quickClick(checkoutAction);
-      await settleAfterAction(page);
+    const count = await checkoutAction.count().catch(() => 0);
+    const label = await locatorLabel(checkoutAction);
+    console.log(`Checkout candidate after wait: count=${count} label="${label}".`);
+  }
+}
+
+async function clickCartCheckout(page: Page): Promise<void> {
+  await page.locator('button[data-test="checkout-button"]').first().waitFor({ state: "visible", timeout: 2_000 });
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const checkoutButton = page.locator('button[data-test="checkout-button"]').first();
+    const label = await locatorLabel(checkoutButton);
+    console.log(`Proceeding to checkout via "${label || "Check out"}" (attempt ${attempt}).`);
+    await clickCheckout(page, checkoutButton);
+
+    await page.waitForURL(/checkout|co-review|co-delivery|co-payment|co-login/i, {
+      timeout: 2_000
+    }).catch(() => undefined);
+
+    if (isCheckoutLikeUrl(page.url())) {
       return;
     }
+
+    await settlePage(page, MEDIUM_SETTLE_MS);
   }
+
+  const diagnostics = await collectCheckoutDiagnostics(page);
+  throw new Error(`Clicked the cart checkout button, but Target stayed on ${page.url()}.\n${diagnostics}`);
+}
+
+async function collectCheckoutDiagnostics(page: Page): Promise<string> {
+  const buttons = await page
+    .locator("button")
+    .evaluateAll((nodes) =>
+      nodes
+        .map((node) => ({
+          text: (node.textContent ?? "").replace(/\s+/g, " ").trim(),
+          aria: node.getAttribute("aria-label") ?? "",
+          dataTest: node.getAttribute("data-test") ?? "",
+          disabled:
+            node.hasAttribute("disabled") || node.getAttribute("aria-disabled") === "true"
+        }))
+        .filter((entry) => /checkout|check out|order|continue/i.test(`${entry.text} ${entry.aria} ${entry.dataTest}`))
+        .slice(0, 12)
+    )
+    .catch(() => []);
+
+  return buttons.length > 0
+    ? `Checkout-related buttons:\n${buttons
+        .map((entry) => `- text="${entry.text}" aria="${entry.aria}" data-test="${entry.dataTest}" disabled=${entry.disabled}`)
+        .join("\n")}`
+    : "No checkout-related buttons found.";
+}
+
+async function clickCheckout(page: Page, locator: Locator): Promise<void> {
+  await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+
+  const clickedByMouse = await clickLocatorCenter(page, locator);
+  if (clickedByMouse) {
+    return;
+  }
+
+  try {
+    await locator.click({
+      noWaitAfter: true,
+      timeout: 1_500
+    });
+    return;
+  } catch {
+    await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+  }
+
+  try {
+    await locator.click({
+      force: true,
+      noWaitAfter: true,
+      timeout: 1_000
+    });
+    return;
+  } catch {
+    // Try the page's native click handler as a final fallback.
+  }
+
+  const clicked = await locator
+    .evaluate((node) => {
+      if (!(node instanceof HTMLElement)) {
+        return false;
+      }
+
+      node.click();
+      return true;
+    })
+    .catch(() => false);
+
+  if (!clicked) {
+    throw new Error("Unable to click the checkout button.");
+  }
+}
+
+async function clickLocatorCenter(page: Page, locator: Locator): Promise<boolean> {
+  const box = await locator.boundingBox().catch(() => null);
+  if (!box) {
+    return false;
+  }
+
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  return true;
 }
 
 async function driveCheckout(page: Page, maxSteps: number): Promise<void> {
@@ -661,7 +836,7 @@ async function locatorLabel(locator: Locator): Promise<string> {
   return normalizeWhitespace(`${text} ${aria}`);
 }
 
-async function quickClick(locator: Locator): Promise<void> {
+async function quickClick(locator: Locator, timeoutMs = FAST_CLICK_TIMEOUT_MS): Promise<void> {
   const visible = await safeIsVisible(locator);
   if (!visible) {
     await locator.scrollIntoViewIfNeeded().catch(() => undefined);
@@ -670,7 +845,7 @@ async function quickClick(locator: Locator): Promise<void> {
   try {
     await locator.click({
       noWaitAfter: true,
-      timeout: FAST_CLICK_TIMEOUT_MS
+      timeout: timeoutMs
     });
     return;
   } catch {
@@ -689,7 +864,7 @@ async function quickClick(locator: Locator): Promise<void> {
       await locator.click({
         force: true,
         noWaitAfter: true,
-        timeout: FAST_CLICK_TIMEOUT_MS
+        timeout: timeoutMs
       });
     }
   }
@@ -699,6 +874,27 @@ async function clickAddToCart(locator: Locator): Promise<void> {
   const visible = await safeIsVisible(locator);
   if (!visible) {
     await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+  }
+
+  try {
+    await locator.click({
+      noWaitAfter: true,
+      timeout: 5_000
+    });
+    return;
+  } catch {
+    await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+  }
+
+  try {
+    await locator.click({
+      force: true,
+      noWaitAfter: true,
+      timeout: FAST_CLICK_TIMEOUT_MS
+    });
+    return;
+  } catch {
+    // Fall back to a DOM click only when user-like Playwright clicks fail.
   }
 
   const domClicked = await locator
@@ -716,7 +912,7 @@ async function clickAddToCart(locator: Locator): Promise<void> {
     return;
   }
 
-  await quickClick(locator);
+  throw new Error("Unable to click the Add to cart button.");
 }
 
 function toMeaningfulTokens(value: string): string[] {
@@ -744,6 +940,8 @@ async function collectPurchaseDiagnostics(page: Page): Promise<string> {
         .map((node) => ({
           text: (node.textContent ?? "").replace(/\s+/g, " ").trim(),
           aria: node.getAttribute("aria-label") ?? "",
+          dataTest: node.getAttribute("data-test") ?? "",
+          id: node.id,
           disabled:
             node.hasAttribute("disabled") || node.getAttribute("aria-disabled") === "true"
         }))
@@ -754,7 +952,10 @@ async function collectPurchaseDiagnostics(page: Page): Promise<string> {
 
   const addToCartLines = buttons
     .filter((entry) => `${entry.text} ${entry.aria}`.toLowerCase().includes("add to cart"))
-    .map((entry) => `- text="${entry.text}" aria="${entry.aria}" disabled=${entry.disabled}`);
+    .map(
+      (entry) =>
+        `- text="${entry.text}" aria="${entry.aria}" data-test="${entry.dataTest}" id="${entry.id}" disabled=${entry.disabled}`
+    );
 
   const availabilityHeadings = headings
     .filter((heading) => /available|pickup|delivery|shipping|exclusive/i.test(heading))
@@ -821,10 +1022,14 @@ export async function settleDomOnly(page: Page, fallbackMs: number): Promise<voi
 }
 
 async function waitForCartState(page: Page): Promise<void> {
-  const deadline = Date.now() + 2_500;
+  const deadline = Date.now() + 15_000;
 
   while (Date.now() < deadline) {
     if (await requiresLogin(page)) {
+      return;
+    }
+
+    if ((await getHeaderCartItemCount(page)) > 0) {
       return;
     }
 
@@ -832,18 +1037,12 @@ async function waitForCartState(page: Page): Promise<void> {
       return;
     }
 
-    if (await findCartEntryAction(page)) {
-      return;
-    }
-
-    if (await findSidecartReadyState(page)) {
-      return;
-    }
+    await findSidecartReadyState(page);
 
     await page.waitForTimeout(POLL_INTERVAL_MS);
   }
 
-  await settleDomOnly(page, SHORT_SETTLE_MS);
+  throw new Error("Add to cart was clicked, but the cart count never increased.");
 }
 
 async function findSidecartReadyState(page: Page): Promise<boolean> {
@@ -868,6 +1067,13 @@ async function findSidecartReadyState(page: Page): Promise<boolean> {
 
   const pageText = normalizeWhitespace(await page.locator("body").innerText().catch(() => ""));
   return SIDECART_READY_PATTERNS.some((pattern) => pattern.test(pageText));
+}
+
+async function getHeaderCartItemCount(page: Page): Promise<number> {
+  const cartLink = page.locator('[data-test="@web/CartLink"]').first();
+  const label = await locatorLabel(cartLink);
+  const match = label.match(/\bcart\s+(\d+)\s+items?\b/i);
+  return match ? Number(match[1]) : 0;
 }
 
 async function safeIsVisible(locator: Locator): Promise<boolean> {

@@ -8,13 +8,14 @@ import { formatDuration, waitUntil } from "./schedule.js";
 import {
   ensureAssistantPage,
   launchPersistentTargetContext,
-  preferShippingOnProductPage,
+  preferShippingOnProductPageFast,
   requiresLogin,
   runBuyFlowOnPage,
   settleDomOnly
 } from "./assistant.js";
 
 const WATCH_SETTLE_MS = 100;
+const WATCH_NAV_TIMEOUT_MS = 1_500;
 
 export async function runBrowserWatchAndBuy(
   tracker: Tracker,
@@ -43,8 +44,20 @@ export async function runBrowserWatchAndBuy(
     }
 
     while (true) {
-      const snapshot = await captureBrowserSnapshot(page, config);
-      const result = await tracker.recordSnapshot(snapshot);
+      let result;
+      try {
+        const snapshot = await captureBrowserSnapshot(page, config);
+        result = await tracker.recordSnapshot(snapshot);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/authentication|helper:login/i.test(message)) {
+          throw error;
+        }
+
+        console.error(`Browser-backed poll failed; refreshing and continuing. ${message}`);
+        await sleep(pollIntervalMs);
+        continue;
+      }
 
       if (result.snapshot.availability === "in_stock") {
         console.log(
@@ -68,9 +81,9 @@ export async function runBrowserWatchAndBuy(
 }
 
 async function captureBrowserSnapshot(page: Page, config: AppConfig) {
-  await page.goto(config.targetProductUrl!, { waitUntil: "domcontentloaded" }).catch((error) => {
+  await page.goto(config.targetProductUrl!, { waitUntil: "domcontentloaded", timeout: WATCH_NAV_TIMEOUT_MS }).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("net::ERR_ABORTED")) {
+    if (!message.includes("net::ERR_ABORTED") && !message.includes("Timeout")) {
       throw error;
     }
   });
@@ -82,7 +95,7 @@ async function captureBrowserSnapshot(page: Page, config: AppConfig) {
     );
   }
 
-  await preferShippingOnProductPage(page);
+  await preferShippingOnProductPageFast(page);
   await settleDomOnly(page, WATCH_SETTLE_MS);
 
   return parseTargetPage({
@@ -93,9 +106,9 @@ async function captureBrowserSnapshot(page: Page, config: AppConfig) {
 }
 
 async function prepareBrowserWatchPage(page: Page, config: AppConfig): Promise<void> {
-  await page.goto(config.targetProductUrl!, { waitUntil: "domcontentloaded" }).catch((error) => {
+  await page.goto(config.targetProductUrl!, { waitUntil: "domcontentloaded", timeout: WATCH_NAV_TIMEOUT_MS }).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("net::ERR_ABORTED")) {
+    if (!message.includes("net::ERR_ABORTED") && !message.includes("Timeout")) {
       throw error;
     }
   });

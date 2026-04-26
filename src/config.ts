@@ -38,7 +38,7 @@ const envSchema = z.object({
   TARGET_PROFILE_DIR: z.string().trim().default(".data/target-profile"),
   TARGET_LOGIN_URL: z.string().trim().url().default("https://www.target.com/login"),
   TARGET_CART_URL: z.string().trim().url().default("https://www.target.com/co-cart"),
-  TARGET_CHECKOUT_QUANTITY: z.coerce.number().int().positive().max(1).default(1),
+  TARGET_CHECKOUT_QUANTITY: z.coerce.number().int().positive().max(10).default(1),
   TARGET_HELPER_HEADLESS: booleanFromEnv.default(false),
   TARGET_HELPER_PROCEED_TO_CHECKOUT: booleanFromEnv.default(true),
   TARGET_HELPER_MAX_CHECKOUT_STEPS: z.coerce.number().int().positive().default(8),
@@ -78,7 +78,7 @@ export interface AppConfig {
   targetProfileDir: string;
   targetLoginUrl: string;
   targetCartUrl: string;
-  targetCheckoutQuantity: 1;
+  targetCheckoutQuantity: number;
   targetHelperHeadless: boolean;
   targetHelperProceedToCheckout: boolean;
   targetHelperMaxCheckoutSteps: number;
@@ -112,7 +112,7 @@ export function loadConfig(): AppConfig {
     targetProfileDir: parsed.TARGET_PROFILE_DIR,
     targetLoginUrl: parsed.TARGET_LOGIN_URL,
     targetCartUrl: parsed.TARGET_CART_URL,
-    targetCheckoutQuantity: 1,
+    targetCheckoutQuantity: parsed.TARGET_CHECKOUT_QUANTITY,
     targetHelperHeadless: parsed.TARGET_HELPER_HEADLESS,
     targetHelperProceedToCheckout: parsed.TARGET_HELPER_PROCEED_TO_CHECKOUT,
     targetHelperMaxCheckoutSteps: parsed.TARGET_HELPER_MAX_CHECKOUT_STEPS,

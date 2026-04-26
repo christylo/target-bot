@@ -81,7 +81,7 @@ test("loadConfig parses the tracker settings and SMTP config", () => {
       TARGET_PROFILE_DIR: ".data/custom-profile",
       TARGET_LOGIN_URL: "https://www.target.com/login",
       TARGET_CART_URL: "https://www.target.com/co-cart",
-      TARGET_CHECKOUT_QUANTITY: "1",
+      TARGET_CHECKOUT_QUANTITY: "2",
       TARGET_HELPER_HEADLESS: "true",
       TARGET_HELPER_PROCEED_TO_CHECKOUT: "false",
       TARGET_HELPER_MAX_CHECKOUT_STEPS: "12",
@@ -112,7 +112,7 @@ test("loadConfig parses the tracker settings and SMTP config", () => {
       assert.equal(config.targetProfileDir, ".data/custom-profile");
       assert.equal(config.targetLoginUrl, "https://www.target.com/login");
       assert.equal(config.targetCartUrl, "https://www.target.com/co-cart");
-      assert.equal(config.targetCheckoutQuantity, 1);
+      assert.equal(config.targetCheckoutQuantity, 2);
       assert.equal(config.targetHelperHeadless, true);
       assert.equal(config.targetHelperProceedToCheckout, false);
       assert.equal(config.targetHelperMaxCheckoutSteps, 12);

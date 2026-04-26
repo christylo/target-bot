@@ -1,7 +1,7 @@
 import { loadConfig } from "./config.js";
 import { createNotifiers } from "./alerts/notifier.js";
 import { Tracker } from "./core/tracker.js";
-import { runBrowserWatchAndBuy } from "./helper/browser-watch.js";
+import { runAssistant } from "./helper/assistant.js";
 import { formatDuration, resolveScheduledStart } from "./helper/schedule.js";
 import { sleep } from "./utils/runtime.js";
 
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "watch-buy") {
-    await runBrowserWatchAndBuy(tracker, config.pollIntervalMs, config);
+    await runHttpWatchAndBuy(tracker, config.pollIntervalMs, config);
     return;
   }
 
@@ -36,9 +36,11 @@ async function main(): Promise<void> {
     const startAt = resolveScheduledStart(rawTimestamp);
     const delayMs = startAt.getTime() - Date.now();
     console.log(
-      `Scheduling browser-backed watch-and-buy for ${startAt.toString()} (${formatDuration(delayMs)} from now).`
+      `Scheduling low-latency watch-and-buy for ${startAt.toString()} (${formatDuration(delayMs)} from now).`
     );
-    await runBrowserWatchAndBuy(tracker, config.pollIntervalMs, config, { startAt });
+    await sleep(delayMs);
+    console.log(`Starting low-latency poll at ${new Date().toString()}.`);
+    await runHttpWatchAndBuy(tracker, config.pollIntervalMs, config);
     return;
   }
 
@@ -56,6 +58,39 @@ async function runWatchLoop(tracker: Tracker, pollIntervalMs: number): Promise<v
     }
 
     await sleep(pollIntervalMs);
+  }
+}
+
+async function runHttpWatchAndBuy(
+  tracker: Tracker,
+  pollIntervalMs: number,
+  config: ReturnType<typeof loadConfig>
+): Promise<void> {
+  console.log(`Starting low-latency watch-and-buy loop with ${pollIntervalMs}ms polling interval.`);
+
+  while (true) {
+    const startedAt = Date.now();
+
+    try {
+      const result = await tracker.checkOnce();
+      if (result.snapshot.availability === "in_stock") {
+        console.log(
+          `HTTP stock detection saw in_stock at ${result.snapshot.checkedAt}. Launching browser buy helper immediately.`
+        );
+        try {
+          await runAssistant("buy", config);
+          return;
+        } catch (error) {
+          console.error(`Buy helper failed after stock detection: ${(error as Error).message}`);
+          console.error("Low-latency watcher will continue polling.");
+        }
+      }
+    } catch (error) {
+      console.error(`Low-latency poll failed; continuing. ${(error as Error).message}`);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    await sleep(Math.max(0, pollIntervalMs - elapsedMs));
   }
 }
 
