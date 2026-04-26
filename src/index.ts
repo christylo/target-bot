@@ -8,7 +8,10 @@ import { sleep } from "./utils/runtime.js";
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const config = loadConfig({ targetProductUrl: args.targetProductUrl });
+  const config = loadConfig({
+    targetProductUrl: args.targetProductUrl,
+    pollIntervalMs: args.pollIntervalMs
+  });
   const command = args.positional[0] ?? "once";
   const tracker = new Tracker(config, createNotifiers(config));
 

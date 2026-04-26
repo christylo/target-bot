@@ -168,6 +168,20 @@ test("loadConfig lets a CLI URL override local HTML mode", () => {
   );
 });
 
+test("loadConfig lets a CLI poll interval override POLL_INTERVAL_MS", () => {
+  withEnv(
+    {
+      TARGET_PRODUCT_URL: TEST_TARGET_PRODUCT_URL,
+      POLL_INTERVAL_MS: "5000"
+    },
+    () => {
+      const config = loadConfig({ pollIntervalMs: 750 });
+
+      assert.equal(config.pollIntervalMs, 750);
+    }
+  );
+});
+
 test("loadConfig rejects invalid extra header JSON", () => {
   withEnv(
     {

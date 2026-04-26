@@ -88,6 +88,7 @@ export interface AppConfig {
 
 export interface ConfigOverrides {
   targetProductUrl?: string;
+  pollIntervalMs?: number;
 }
 
 export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
@@ -104,7 +105,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
 
   return {
     targetProductUrl,
-    pollIntervalMs: parsed.POLL_INTERVAL_MS,
+    pollIntervalMs: overrides.pollIntervalMs ?? parsed.POLL_INTERVAL_MS,
     requestTimeoutMs: parsed.REQUEST_TIMEOUT_MS,
     stateFile: parsed.STATE_FILE,
     alertCooldownMs: parsed.ALERT_COOLDOWN_MS,

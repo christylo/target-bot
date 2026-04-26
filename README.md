@@ -64,10 +64,10 @@ npm run watch
 You can override `TARGET_PRODUCT_URL` for a single run without editing `.env`:
 
 ```bash
-npm run watch:buy -- --url "https://www.target.com/p/your-target-product/-/A-12345678"
+npm run watch:buy -- --url "https://www.target.com/p/your-target-product/-/A-12345678" --poll-interval-ms 1000
 ```
 
-The `--url` option also works with helper commands such as `helper:buy` and `helper:buy-at`.
+The `--url` option also works with helper commands such as `helper:buy` and `helper:buy-at`. The `--poll-interval-ms` option overrides `POLL_INTERVAL_MS` for that run.
 
 ## Drop-night runbook
 

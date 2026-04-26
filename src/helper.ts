@@ -5,7 +5,10 @@ import { formatDuration, resolveScheduledStart, waitUntil } from "./helper/sched
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const config = loadConfig({ targetProductUrl: args.targetProductUrl });
+  const config = loadConfig({
+    targetProductUrl: args.targetProductUrl,
+    pollIntervalMs: args.pollIntervalMs
+  });
   const command = (args.positional[0] ?? "login") as HelperCommand | "buy-at";
 
   if (!["login", "buy", "buy-at"].includes(command)) {
