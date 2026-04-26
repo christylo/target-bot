@@ -136,6 +136,38 @@ test("loadConfig requires either a product URL or a local HTML file", () => {
   });
 });
 
+test("loadConfig lets a CLI URL override TARGET_PRODUCT_URL", () => {
+  const overrideUrl = "https://www.target.com/p/override-product/-/A-11111111";
+
+  withEnv(
+    {
+      TARGET_PRODUCT_URL: TEST_TARGET_PRODUCT_URL
+    },
+    () => {
+      const config = loadConfig({ targetProductUrl: overrideUrl });
+
+      assert.equal(config.targetProductUrl, overrideUrl);
+    }
+  );
+});
+
+test("loadConfig lets a CLI URL override local HTML mode", () => {
+  const overrideUrl = "https://www.target.com/p/override-product/-/A-11111111";
+
+  withEnv(
+    {
+      TARGET_PRODUCT_URL: undefined,
+      TARGET_HTML_FILE: "target.html"
+    },
+    () => {
+      const config = loadConfig({ targetProductUrl: overrideUrl });
+
+      assert.equal(config.targetProductUrl, overrideUrl);
+      assert.equal(config.targetHtmlFile, undefined);
+    }
+  );
+});
+
 test("loadConfig rejects invalid extra header JSON", () => {
   withEnv(
     {

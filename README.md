@@ -61,6 +61,14 @@ npm run watch
 - `npm run build`: Compile to `dist/`.
 - `npm run verify`: Run type-check, tests, and build in one pass.
 
+You can override `TARGET_PRODUCT_URL` for a single run without editing `.env`:
+
+```bash
+npm run watch:buy -- --url "https://www.target.com/p/your-target-product/-/A-12345678"
+```
+
+The `--url` option also works with helper commands such as `helper:buy` and `helper:buy-at`.
+
 ## Drop-night runbook
 
 If you are targeting a Target online release that is expected to start on `3/21`, the safest operating assumption is "be ready a few minutes before midnight local time and stay ready through the first several minutes after the date rolls over."

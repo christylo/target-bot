@@ -86,10 +86,16 @@ export interface AppConfig {
   smtp?: SmtpConfig;
 }
 
-export function loadConfig(): AppConfig {
-  const parsed = envSchema.parse(process.env);
+export interface ConfigOverrides {
+  targetProductUrl?: string;
+}
 
-  if (!parsed.TARGET_PRODUCT_URL && !parsed.TARGET_HTML_FILE) {
+export function loadConfig(overrides: ConfigOverrides = {}): AppConfig {
+  const parsed = envSchema.parse(process.env);
+  const targetProductUrl = overrides.targetProductUrl?.trim() || parsed.TARGET_PRODUCT_URL;
+  const targetHtmlFile = overrides.targetProductUrl?.trim() ? undefined : parsed.TARGET_HTML_FILE;
+
+  if (!targetProductUrl && !targetHtmlFile) {
     throw new Error("Set TARGET_PRODUCT_URL or TARGET_HTML_FILE in .env before running the tracker.");
   }
 
@@ -97,7 +103,7 @@ export function loadConfig(): AppConfig {
   const smtp = buildSmtpConfig(parsed);
 
   return {
-    targetProductUrl: parsed.TARGET_PRODUCT_URL,
+    targetProductUrl,
     pollIntervalMs: parsed.POLL_INTERVAL_MS,
     requestTimeoutMs: parsed.REQUEST_TIMEOUT_MS,
     stateFile: parsed.STATE_FILE,
@@ -108,7 +114,7 @@ export function loadConfig(): AppConfig {
     targetCookieHeader: parsed.TARGET_COOKIE_HEADER,
     targetUserAgent: parsed.TARGET_USER_AGENT,
     targetExtraHeaders,
-    targetHtmlFile: parsed.TARGET_HTML_FILE,
+    targetHtmlFile,
     targetProfileDir: parsed.TARGET_PROFILE_DIR,
     targetLoginUrl: parsed.TARGET_LOGIN_URL,
     targetCartUrl: parsed.TARGET_CART_URL,
