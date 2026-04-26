@@ -54,12 +54,23 @@ npm run watch
 - `npm run once`: Fetch and evaluate the product page once.
 - `npm run watch`: Keep polling until stopped.
 - `npm run watch:buy`: Keep polling until the product is detected in stock, then launch the buy helper immediately.
+- `npm run watch:fast-buy`: Keep polling with the browser, then replay recorded cart/checkout requests when the product is detected in stock.
 - `npm run helper:login`: Open a persistent browser profile so you can sign in to Target manually.
 - `npm run helper:buy`: Reuse that saved session, add one item if available, and move toward checkout without placing the order.
 - `npm run helper:buy-at -- 2026-03-20T23:58:00`: Wait until an exact local timestamp, then launch the buy helper automatically.
+- `npm run helper:record`: Run the normal browser buy helper, record the non-final network requests, and stop at the human handoff.
+- `npm run helper:fast-buy`: Replay recorded Target cart/checkout requests, then open the browser at the handoff page.
 - `npm run check`: Type-check the project.
 - `npm run build`: Compile to `dist/`.
 - `npm run verify`: Run type-check, tests, and build in one pass.
+
+You can override `TARGET_PRODUCT_URL` for a single run without editing `.env`:
+
+```bash
+npm run watch:fast-buy -- --url "https://www.target.com/p/your-target-product/-/A-12345678"
+```
+
+The `--url` option also works with helper commands such as `helper:record`, `helper:fast-buy`, and `helper:buy`.
 
 ## Drop-night runbook
 
@@ -146,6 +157,7 @@ This keeps the stock detection logic stable while isolating browser actions in a
 - `TARGET_HELPER_PROCEED_TO_CHECKOUT`: If `true`, attempts to move from cart into checkout, but still stops before final order submission.
 - `TARGET_HELPER_MAX_CHECKOUT_STEPS`: Safety cap for automated checkout step clicks before handing off.
 - `TARGET_HELPER_START_AT`: Optional local timestamp used by `buy-at` if you do not pass one on the command line.
+- `TARGET_NETWORK_RECORDING_FILE`: Local JSON file used by `helper:record` and `helper:fast-buy`.
 
 ## Credential handling
 

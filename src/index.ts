@@ -1,13 +1,15 @@
 import { loadConfig } from "./config.js";
 import { createNotifiers } from "./alerts/notifier.js";
+import { parseArgs } from "./cli.js";
 import { Tracker } from "./core/tracker.js";
-import { runBrowserWatchAndBuy } from "./helper/browser-watch.js";
+import { runBrowserWatchAndBuy, runBrowserWatchAndFastBuy } from "./helper/browser-watch.js";
 import { formatDuration, resolveScheduledStart } from "./helper/schedule.js";
 import { sleep } from "./utils/runtime.js";
 
 async function main(): Promise<void> {
-  const config = loadConfig();
-  const command = process.argv[2] ?? "once";
+  const args = parseArgs(process.argv.slice(2));
+  const config = loadConfig({ targetProductUrl: args.targetProductUrl });
+  const command = args.positional[0] ?? "once";
   const tracker = new Tracker(config, createNotifiers(config));
 
   if (command === "once") {
@@ -25,8 +27,13 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "watch-fast-buy") {
+    await runBrowserWatchAndFastBuy(tracker, config.pollIntervalMs, config);
+    return;
+  }
+
   if (command === "watch-buy-at") {
-    const rawTimestamp = process.argv[3] ?? process.env.TARGET_WATCH_START_AT;
+    const rawTimestamp = args.positional[1] ?? process.env.TARGET_WATCH_START_AT;
     if (!rawTimestamp) {
       throw new Error(
         `watch-buy-at requires a timestamp argument or TARGET_WATCH_START_AT. Example: npm run watch:buy-at -- 2026-03-21T00:00:00`
@@ -42,7 +49,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  throw new Error(`Unknown command "${command}". Use "once", "watch", "watch-buy", or "watch-buy-at".`);
+  throw new Error(`Unknown command "${command}". Use "once", "watch", "watch-buy", "watch-fast-buy", or "watch-buy-at".`);
 }
 
 async function runWatchLoop(tracker: Tracker, pollIntervalMs: number): Promise<void> {

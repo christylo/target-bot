@@ -8,6 +8,7 @@ export type HelperCommand = "login" | "buy";
 interface BuyFlowOptions {
   useCurrentPage?: boolean;
   currentPagePrepared?: boolean;
+  stopAtHandoff?: boolean;
 }
 
 const FINALIZE_PATTERNS = [
@@ -160,10 +161,7 @@ export async function runBuyFlowOnPage(
         timing.sinceLast("checkout automation finished");
       }
 
-      console.log("Reached the handoff point. The browser is paused before final order submission.");
-      console.log(`Current page: ${page.url()}`);
-      console.log("Make the final click yourself, then press Ctrl+C here when you're done.");
-      await waitForInterrupt();
+      await handoffToHuman(page, options);
       return;
     }
 
@@ -185,10 +183,7 @@ export async function runBuyFlowOnPage(
         timing.sinceLast("checkout automation finished");
       }
 
-      console.log("Reached the handoff point. The browser is paused before final order submission.");
-      console.log(`Current page: ${page.url()}`);
-      console.log("Make the final click yourself, then press Ctrl+C here when you're done.");
-      await waitForInterrupt();
+      await handoffToHuman(page, options);
       return;
     }
 
@@ -230,10 +225,7 @@ export async function runBuyFlowOnPage(
     timing.sinceLast("checkout automation finished");
   }
 
-  console.log("Reached the handoff point. The browser is paused before final order submission.");
-  console.log(`Current page: ${page.url()}`);
-  console.log("Make the final click yourself, then press Ctrl+C here when you're done.");
-  await waitForInterrupt();
+  await handoffToHuman(page, options);
 }
 
 export async function requiresLogin(page: Page): Promise<boolean> {
@@ -382,8 +374,12 @@ export async function preferShippingOnProductPage(page: Page): Promise<void> {
     }
 
     console.log(`Selecting Shipping on product page via "${label || "shipping option"}".`);
-    await quickClick(candidate);
-    await settleAfterAction(page);
+    try {
+      await quickClick(candidate);
+      await settleAfterAction(page);
+    } catch (error) {
+      console.log(`Shipping preference click was skipped: ${(error as Error).message}`);
+    }
     return;
   }
 }
@@ -449,8 +445,13 @@ async function preferShippingInCart(page: Page): Promise<void> {
     }
 
     console.log(`Selecting Shipping in cart via "${label || "shipping option"}".`);
-    await quickClick(candidate);
-    await settleAfterAction(page);
+    try {
+      await quickClick(candidate);
+      await settleAfterAction(page);
+    } catch (error) {
+      console.log(`Cart shipping preference click was skipped: ${(error as Error).message}`);
+      return;
+    }
 
     if (!isCartLikeUrl(page.url()) && !isCheckoutLikeUrl(page.url())) {
       console.log(`Shipping selection navigated to a non-cart page (${page.url()}). Returning to cart and leaving fulfillment unchanged.`);
@@ -495,7 +496,7 @@ async function attemptCheckout(page: Page): Promise<void> {
           console.log('Cart checkout button was attached but could not be clicked via DOM fallback.');
         }
       }
-      await settleAfterAction(page);
+      await settleCheckoutAction(page);
       return;
     }
 
@@ -513,7 +514,7 @@ async function attemptCheckout(page: Page): Promise<void> {
       const label = await locatorLabel(checkoutAction);
       console.log(`Proceeding to checkout via "${label || "checkout"}".`);
       await quickClick(checkoutAction);
-      await settleAfterAction(page);
+      await settleCheckoutAction(page);
       return;
     }
   }
@@ -787,6 +788,18 @@ async function waitForInterrupt(): Promise<void> {
   });
 }
 
+async function handoffToHuman(page: Page, options: BuyFlowOptions): Promise<void> {
+  console.log("Reached the handoff point. The browser is paused before final order submission.");
+  console.log(`Current page: ${page.url()}`);
+
+  if (options.stopAtHandoff) {
+    return;
+  }
+
+  console.log("Make the final click yourself, then press Ctrl+C here when you're done.");
+  await waitForInterrupt();
+}
+
 function createTimingLogger(): TimingLogger {
   const startedAt = Date.now();
   let lastAt = startedAt;
@@ -807,6 +820,11 @@ function createTimingLogger(): TimingLogger {
 
 async function settleAfterAction(page: Page): Promise<void> {
   await settleDomOnly(page, SHORT_SETTLE_MS);
+}
+
+async function settleCheckoutAction(page: Page): Promise<void> {
+  await page.waitForURL(/checkout|co-|login|signin|cart/i, { timeout: 5_000 }).catch(() => undefined);
+  await settlePage(page, MEDIUM_SETTLE_MS);
 }
 
 async function settlePage(page: Page, fallbackMs: number): Promise<void> {

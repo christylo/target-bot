@@ -4,6 +4,7 @@ import type { AppConfig } from "../config.js";
 import { Tracker } from "../core/tracker.js";
 import { parseTargetPage } from "../providers/target.js";
 import { sleep } from "../utils/runtime.js";
+import { runFastBuyFromRecording } from "./network-flow.js";
 import { formatDuration, waitUntil } from "./schedule.js";
 import {
   ensureAssistantPage,
@@ -30,8 +31,11 @@ export async function runBrowserWatchAndBuy(
 
   const context = await launchPersistentTargetContext(config);
   const page = await ensureAssistantPage(context);
+  let pollCount = 0;
 
   try {
+    await configureWatchPage(page);
+
     if (options.startAt) {
       await prepareBrowserWatchPage(page, config);
       const delayMs = options.startAt.getTime() - Date.now();
@@ -43,7 +47,7 @@ export async function runBrowserWatchAndBuy(
     }
 
     while (true) {
-      const snapshot = await captureBrowserSnapshot(page, config);
+      const snapshot = await captureBrowserSnapshot(page, config, ++pollCount);
       const result = await tracker.recordSnapshot(snapshot);
 
       if (result.snapshot.availability === "in_stock") {
@@ -67,8 +71,67 @@ export async function runBrowserWatchAndBuy(
   }
 }
 
-async function captureBrowserSnapshot(page: Page, config: AppConfig) {
-  await page.goto(config.targetProductUrl!, { waitUntil: "domcontentloaded" }).catch((error) => {
+export async function runBrowserWatchAndFastBuy(
+  tracker: Tracker,
+  pollIntervalMs: number,
+  config: AppConfig,
+  options: { startAt?: Date } = {}
+): Promise<void> {
+  if (!config.targetProductUrl) {
+    throw new Error("TARGET_PRODUCT_URL must be set for browser watch-and-fast-buy.");
+  }
+
+  console.log(`Starting browser-backed watch-and-fast-buy loop with ${pollIntervalMs}ms polling interval.`);
+
+  const context = await launchPersistentTargetContext(config);
+  const page = await ensureAssistantPage(context);
+  let contextClosed = false;
+  let pollCount = 0;
+
+  try {
+    await configureWatchPage(page);
+
+    if (options.startAt) {
+      await prepareBrowserWatchPage(page, config);
+      const delayMs = options.startAt.getTime() - Date.now();
+      console.log(
+        `Armed browser-backed watch-and-fast-buy for ${options.startAt.toString()} (${formatDuration(delayMs)} from now).`
+      );
+      await waitUntil(options.startAt);
+      console.log(`Starting exact-timestamp browser poll at ${new Date().toString()}.`);
+    }
+
+    while (true) {
+      const snapshot = await captureBrowserSnapshot(page, config, ++pollCount);
+      const result = await tracker.recordSnapshot(snapshot);
+
+      if (result.snapshot.availability === "in_stock") {
+        console.log(
+          `Browser-backed stock detection saw in_stock at ${result.snapshot.checkedAt}. Replaying recorded cart/checkout requests immediately.`
+        );
+        await context.close();
+        contextClosed = true;
+        await runFastBuyFromRecording(config);
+        return;
+      }
+
+      await sleep(pollIntervalMs);
+    }
+  } finally {
+    if (!contextClosed) {
+      await context.close();
+    }
+  }
+}
+
+async function captureBrowserSnapshot(page: Page, config: AppConfig, pollCount: number) {
+  const pollUrl = buildPollUrl(config.targetProductUrl!, pollCount);
+  console.log(`[watch] poll #${pollCount}: refreshing product page`);
+
+  await page.goto(pollUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: config.requestTimeoutMs
+  }).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     if (!message.includes("net::ERR_ABORTED")) {
       throw error;
@@ -87,7 +150,7 @@ async function captureBrowserSnapshot(page: Page, config: AppConfig) {
 
   return parseTargetPage({
     html: await page.content(),
-    fallbackUrl: page.url() || config.targetProductUrl!,
+    fallbackUrl: config.targetProductUrl!,
     sourceKind: "browser-session"
   });
 }
@@ -119,5 +182,23 @@ export async function withPersistentTargetContext<T>(
     return await fn(context, page);
   } finally {
     await context.close();
+  }
+}
+
+async function configureWatchPage(page: Page): Promise<void> {
+  await page.setExtraHTTPHeaders({
+    "cache-control": "no-cache",
+    pragma: "no-cache"
+  });
+}
+
+function buildPollUrl(targetProductUrl: string, pollCount: number): string {
+  try {
+    const url = new URL(targetProductUrl);
+    url.searchParams.set("_target_bot_poll", `${Date.now()}-${pollCount}`);
+    return url.toString();
+  } catch {
+    const separator = targetProductUrl.includes("?") ? "&" : "?";
+    return `${targetProductUrl}${separator}_target_bot_poll=${Date.now()}-${pollCount}`;
   }
 }

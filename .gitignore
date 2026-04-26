@@ -2,6 +2,8 @@
 node_modules
 dist
 .env
+.data/*.html
 .data/*.json
+.data/network
 .data/target-profile
 .data/target-profile-*
