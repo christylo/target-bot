@@ -112,17 +112,7 @@ async function captureBrowserSnapshot(page: Page, config: AppConfig, pollCount: 
     throw new Error("TARGET_PRODUCT_URL must be set for browser-backed watching.");
   }
 
-  console.log(`[browser-watch] poll #${pollCount}: refreshing product page`);
-
-  await page.goto(config.targetProductUrl, {
-    waitUntil: "domcontentloaded",
-    timeout: config.requestTimeoutMs
-  }).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("net::ERR_ABORTED")) {
-      throw error;
-    }
-  });
+  await refreshProductPage(page, config, pollCount);
 
   await settleDomOnly(page, WATCH_SETTLE_MS);
 
@@ -140,4 +130,36 @@ async function captureBrowserSnapshot(page: Page, config: AppConfig, pollCount: 
     fallbackUrl: config.targetProductUrl,
     sourceKind: "browser-session"
   });
+}
+
+async function refreshProductPage(page: Page, config: AppConfig, pollCount: number): Promise<void> {
+  const targetUrl = config.targetProductUrl!;
+  const options = {
+    waitUntil: "domcontentloaded" as const,
+    timeout: config.requestTimeoutMs
+  };
+  const shouldReload = pollCount > 1 && isSameProductPage(page.url(), targetUrl);
+
+  console.log(
+    `[browser-watch] poll #${pollCount}: ${shouldReload ? "reloading current product page" : "opening product page"}`
+  );
+
+  const navigation = shouldReload ? page.reload(options) : page.goto(targetUrl, options);
+
+  await navigation.catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("net::ERR_ABORTED")) {
+      throw error;
+    }
+  });
+}
+
+function isSameProductPage(currentUrl: string, targetUrl: string): boolean {
+  try {
+    const current = new URL(currentUrl);
+    const target = new URL(targetUrl);
+    return current.origin === target.origin && current.pathname === target.pathname;
+  } catch {
+    return false;
+  }
 }
